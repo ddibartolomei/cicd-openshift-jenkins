@@ -8,10 +8,10 @@ trap "echo Setup failed!" ERR
 if [[ $# -eq 0 ]]; then
     SCRIPT_NAME=`basename "$0"`
     echo "Usage:"
-    echo "./$SCRIPT_NAME <environment-type> <target-namespace> <app-name> <config-map-mount-absolute-dir> <ocp-api-url> <ocp-service-token>"
+    echo "./$SCRIPT_NAME <environment-type> <target-namespace> <app-name> <base-image> <config-map-mount-absolute-dir> <ocp-api-url> <ocp-service-token>"
     echo ""
     echo "Usage example:"
-    echo "./$SCRIPT_NAME dev my-project my-app /opt/configurazioni/config https://api.openshiftcluster.company.com:6443 MY_LONG_SERVICE_ACCOUNT_TOKEN"
+    echo "./$SCRIPT_NAME dev my-project my-app jboss-eap72-openshift:1.1 /opt/configurazioni/config https://api.openshiftcluster.company.com:6443 MY_LONG_SERVICE_ACCOUNT_TOKEN"
     echo ""
     echo "<environment-type> can be:"
     echo "  dev              : for development environments, where an image build is executed"
@@ -27,9 +27,10 @@ fi
 ENV_TYPE=$1
 PRJ=$2
 APP=$3
-CONFIG_MAP_MOUNT_DIR=$4
-OCP_API_URL=$5
-TOKEN=$6
+BASE_IMAGE=$4
+CONFIG_MAP_MOUNT_DIR=$5
+OCP_API_URL=$6
+TOKEN=$7
 
 TOKEN_PARAM="--token=${TOKEN}"
 SERVER_PARAM="--server=${OCP_API_URL}"
@@ -48,8 +49,7 @@ echo "Config map mount absolute directory: ${CONFIG_MAP_MOUNT_DIR}"
 echo "----------------------------------------------------------------------"
 echo "CREATING APPLICATION RESOURCE FOR APP ${APP}"
 echo "----------------------------------------------------------------------"
-BASE_IMAGE="jboss-eap72-openshift:1.1"
-echo "Using base image for JBoss EAP 7.2 (${BASE_IMAGE})"
+echo "Using base image ${BASE_IMAGE}"
 oc new-app --image-stream ${BASE_IMAGE} --binary --name=${APP} ${PROJECT_PARAM} ${TOKEN_PARAM} ${SERVER_PARAM}
 
 # Patch deployment config to remove automatic trigger for config/image change

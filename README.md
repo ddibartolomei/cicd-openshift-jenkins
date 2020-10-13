@@ -1,4 +1,4 @@
-# ocp-jenkins-alm
-ocp-jenkins-alm
+# cicd-openshift-jenkins
+
 TODO
 

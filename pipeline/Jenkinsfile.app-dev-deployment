@@ -1,0 +1,60 @@
+
+def sourceBuildTag = ""
+
+pipeline {
+    agent any
+    
+    parameters { 
+        string(name: 'SOURCE_BUILD_TAG', defaultValue: '', description: 'Project source tag for build', trim: true)
+    }
+
+    options {
+        timeout(time: 30, unit: 'MINUTES')
+        timestamps()
+    }
+
+    stages {
+        stage('Run base-pipeline/dev-deployment pipeline') {
+            steps {
+                script {
+                    if (env.gitlabBranch != null) {
+                        if (env.gitlabBranch.startsWith("refs/tags/")) {
+                            sourceBuildTag = gitlabBranch.substring(10);
+                            echo "Using build tag from webhook invocation: $sourceBuildTag"
+                        }
+                        else {
+                            currentBuild.result = "FAILURE"
+                            error('Error occurred: missing or invalid Gitlab tag on tag push webhook invocation')
+                        }
+                    }
+                    else {
+                        // Use the SOURCE_BUILD_TAG parameter
+                        sourceBuildTag = params.SOURCE_BUILD_TAG
+                        echo "Using build tag from manual invocation: $sourceBuildTag"
+                    }
+                    
+                    if (!sourceBuildTag?.trim()) {
+                        currentBuild.result = "FAILURE"
+                        error('Error occurred: missing or invalid build tag')
+                    }
+                }
+
+                build job: 'base-pipeline/dev-deployment', parameters: [
+                    [$class: 'StringParameterValue', name: 'SOURCE_GIT_URL', value: <SOURCE_CODE_REPOSITORY_PLACEHOLDER>"],
+                    [$class: 'StringParameterValue', name: 'SOURCE_GIT_CREDENTIAL_ID', value: "credential-gitlab-repo"],
+                    [$class: 'StringParameterValue', name: 'SOURCE_BUILD_TAG', value: "${sourceBuildTag}"],
+                    [$class: 'StringParameterValue', name: 'CONFIG_GIT_URL', value: "<DEV_ENV_CONFIG_REPOSITORY_PLACEHOLDER>"],
+                    [$class: 'StringParameterValue', name: 'CONFIG_GIT_CREDENTIAL_ID', value: "credential-gitlab-repo"],
+                    [$class: 'StringParameterValue', name: 'APP_ARTIFACT_FILENAME', value: "<APP_ARTIFACT_NAME_PLACEHOLDER>"],
+                    [$class: 'StringParameterValue', name: 'APP_ARTIFACT_RELATIVE_TARGET_PATH', value: "<APP_ARTIFACT_RELATIVE_PATH_PLACEHOLDER>"],
+                    [$class: 'StringParameterValue', name: 'OCP_API_URL', value: "<DEV_ENV_OCP_API_URL_PLACEHOLDER>"],
+                    [$class: 'StringParameterValue', name: 'OCP_SERVICE_TOKEN_CREDENTIAL_ID', value: "dev-env-ocp-jenkins-service-account-token"],
+                    [$class: 'StringParameterValue', name: 'IMAGE_REGISTRY_HOST_PORT', value: "<DEV_ENV_QUAY_REGISTRY_HOST_PORT_PLACEHOLDER>"],
+                    [$class: 'StringParameterValue', name: 'IMAGE_REGISTRY_NAMESPACE_PREFIX', value: "openshift_"],
+                    [$class: 'StringParameterValue', name: 'OCP_PROJECT', value: "<DEV_ENV_OCP_PROJECT_NAMESPACE_PLACEHOLDER>"],
+                    [$class: 'StringParameterValue', name: 'OCP_APP', value: "<OCP_APP_NAME_PLACEHOLDER>"],
+                ], wait: true
+            }
+        }
+    }
+}

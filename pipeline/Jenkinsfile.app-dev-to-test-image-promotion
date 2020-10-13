@@ -1,0 +1,31 @@
+pipeline {
+    agent any
+    
+    parameters { 
+        string(name: 'IMAGE_TAG', defaultValue: '', description: 'Tag of the image used for deployment', trim: true)
+    }
+
+    options {
+        timeout(time: 30, unit: 'MINUTES')
+        timestamps()
+    }
+
+    stages {
+        stage('Run base-pipeline/image-promotion pipeline') {
+            steps {
+                build job: 'base-pipeline/image-promotion', parameters: [
+                    [$class: 'StringParameterValue', name: 'SOURCE_IMAGE_TAG', value: "${params.IMAGE_TAG}"],
+                    [$class: 'StringParameterValue', name: 'SOURCE_IMAGE_NAME', value: "<APP_IMAGE_NAME_PLACEHOLDER>"],
+                    [$class: 'StringParameterValue', name: 'SOURCE_IMAGE_REGISTRY_CREDENTIAL_ID', value: "dev-env-quay-user-pw"],
+                    [$class: 'StringParameterValue', name: 'SOURCE_IMAGE_REGISTRY_HOST_PORT', value: "<DEV_ENV_QUAY_REGISTRY_HOST_PORT_PLACEHOLDER>"],
+                    [$class: 'StringParameterValue', name: 'SOURCE_IMAGE_REGISTRY_NAMESPACE_PREFIX', value: "openshift_"],
+                    [$class: 'StringParameterValue', name: 'SOURCE_IMAGE_NAMESPACE', value: "<DEV_ENV_OCP_PROJECT_NAMESPACE_PLACEHOLDER>"],
+                    [$class: 'StringParameterValue', name: 'TARGET_IMAGE_REGISTRY_CREDENTIAL_ID', value: "test-env-quay-user-pw"],
+                    [$class: 'StringParameterValue', name: 'TARGET_IMAGE_REGISTRY_HOST_PORT', value: "<TEST_ENV_QUAY_REGISTRY_HOST_PORT_PLACEHOLDER>"],
+                    [$class: 'StringParameterValue', name: 'TARGET_IMAGE_REGISTRY_NAMESPACE_PREFIX', value: "openshift_"],
+                    [$class: 'StringParameterValue', name: 'TARGET_IMAGE_NAMESPACE', value: "<TEST_ENV_OCP_PROJECT_NAMESPACE_PLACEHOLDER>"]
+                ], wait: true
+            }
+        }
+    }
+}

@@ -1,0 +1,309 @@
+// configTag is the tag to be used for configuration repository checkout operation. 
+// It is calculated  in the Get config repository tag stage
+def configTag = ""
+// ocpCommandCommonParams is the suffix for every oc command executed in the pipeline, defining OCP cluster api url and namespace to be used
+// It is generated in the Prepare stage
+def ocpCommandCommonParams = ""
+// targetImage is the full image identifier (host/namespace/imagename:tag) of the deployed image
+// It is generated in the Prepare stage
+def targetImage = ""
+// envId is the identifier of the deploy environment as set inside the configuration repository
+def envId = "svil"
+
+pipeline {
+    agent any
+    
+    parameters { 
+       string(name: 'SOURCE_GIT_URL', defaultValue: '', description: 'Git URL of source code repository', trim: true)
+       string(name: 'SOURCE_GIT_CREDENTIAL_ID', defaultValue: '', description: 'Git Credentials ID for source code repository', trim: true)
+       string(name: 'SOURCE_BUILD_TAG', defaultValue: '', description: 'Git tag to checkout and build for source code repository', trim: true)
+       string(name: 'CONFIG_GIT_URL', defaultValue: '', description: 'Git URL of configuration repository', trim: true)
+       string(name: 'CONFIG_GIT_CREDENTIAL_ID', defaultValue: '', description: 'Git Credentials ID for configuration repository', trim: true)
+       string(name: 'APP_ARTIFACT_FILENAME', defaultValue: '', description: 'Expected filename of the generated artifact', trim: true)
+       string(name: 'APP_ARTIFACT_RELATIVE_TARGET_PATH', defaultValue: '', description: 'Relative path containing the compiled artifact, e.g. "dati-conguagli-ws/target"', trim: true)
+       string(name: 'OCP_API_URL', defaultValue: '', description: 'OpenShift cluster API url, e.g. https://api.mycluster.openshift.redhat.com:6443', trim: true)
+       string(name: 'OCP_SERVICE_TOKEN_CREDENTIAL_ID', defaultValue: '', description: 'Credential ID containing the OpenShift service token for authentication', trim: true)
+       string(name: 'OCP_PROJECT', defaultValue: '', description: 'OpenShift target namespace', trim: true)
+       string(name: 'OCP_APP', defaultValue: '', description: 'OpenShift target app name in the target namespace', trim: true)
+       string(name: 'IMAGE_REGISTRY_HOST_PORT', defaultValue: '', description: 'host:port of the image registry, usually refers to the image registry url', trim: true)
+       string(name: 'IMAGE_REGISTRY_NAMESPACE_PREFIX', defaultValue: '', description: 'Prefix for image repository name in the image registry', trim: true)
+    }
+
+    options {
+        timeout(time: 30, unit: 'MINUTES')
+        timestamps()
+    }
+    
+    tools {
+        // Install the Maven version configured as "M3" and add it to the path.
+        maven 'M3'
+    }
+
+    stages {
+        stage('Log pipeline environment') {
+            steps {
+                echo "Code git repository"
+                echo "> Url                : ${params.SOURCE_GIT_URL}"
+                echo "> Credential ID      : ${params.SOURCE_GIT_CREDENTIAL_ID}"
+                echo "> Tag used for build : ${params.SOURCE_BUILD_TAG}"
+                    
+                echo " -------------------------------------------------------- "
+                    
+                echo "Configuration git repository"
+                echo "> Url           : ${params.CONFIG_GIT_URL}"
+                echo "> Credential ID : ${params.CONFIG_GIT_CREDENTIAL_ID}"
+
+                echo " -------------------------------------------------------- "
+                
+                echo "Artifact"
+                echo "> Filename             : ${params.APP_ARTIFACT_FILENAME}"
+                echo "> Relative target path : ${params.APP_ARTIFACT_RELATIVE_TARGET_PATH}"
+
+                echo " -------------------------------------------------------- "
+                
+                echo "OpenShift"
+                echo "> Cluster API Url                         : ${params.OCP_API_URL}"
+                echo "> Project                                 : ${params.OCP_PROJECT}"
+                echo "> App                                     : ${params.OCP_APP}"
+                echo "> Credential ID for service account token : ${params.OCP_SERVICE_TOKEN_CREDENTIAL_ID}"
+                echo "> Registry                                : ${params.IMAGE_REGISTRY_HOST_PORT}"
+                echo "> Registry namespace prefix               : ${params.IMAGE_REGISTRY_NAMESPACE_PREFIX}"
+                    
+                echo " -------------------------------------------------------- "
+                    
+                echo ""
+                echo "Workspace : ${WORKSPACE}"
+            }
+        }
+        stage('Prepare') {
+            steps {
+                script {
+                    ocpCommandCommonParams = "--server=${params.OCP_API_URL} --insecure-skip-tls-verify --namespace=${params.OCP_PROJECT}"
+                    targetImage = "${params.IMAGE_REGISTRY_HOST_PORT}/${params.IMAGE_REGISTRY_NAMESPACE_PREFIX}${params.OCP_PROJECT}/${params.OCP_APP}:${params.SOURCE_BUILD_TAG}"
+                }
+            }
+        }
+        stage('Build') {
+            stages {
+                stage('Source code checkout') {
+                    steps {
+                        checkout(
+                            changelog: false,
+                            poll: false,
+                            scm:
+                            [$class                              : 'GitSCM', branches: [[name: "refs/tags/${params.SOURCE_BUILD_TAG}"]],
+                                doGenerateSubmoduleConfigurations: false,
+                                extensions                       : [[$class: 'RelativeTargetDirectory', relativeTargetDir: 'checkout-directory']],
+                                submoduleCfg                     : [],
+                                userRemoteConfigs                : [[credentialsId: "${params.SOURCE_GIT_CREDENTIAL_ID}", url: "${params.SOURCE_GIT_URL}"]]]
+                        )
+                    }
+                }
+                stage('Get config repository tag') {
+                    steps {
+                        script {
+                            try {
+                                if (!params.SOURCE_BUILD_TAG?.trim() || !params.SOURCE_BUILD_TAG.contains("_")) {
+                                    throw new Exception("Invalid source tag ${params.SOURCE_BUILD_TAG}")
+                                }
+                                
+                                def (stag,ctag) = params.SOURCE_BUILD_TAG.tokenize("_")
+                                if (ctag==null || !ctag.startsWith("config") || ctag.length()<7) {
+                                    throw new Exception("Invalid source tag format ${params.SOURCE_BUILD_TAG}")
+                                }
+                                
+                                configTag = ctag.substring(6).trim()
+                                if (!configTag?.trim()) {
+                                    throw new Exception("Invalid source tag format ${params.SOURCE_BUILD_TAG}")
+                                }
+                                
+                                echo "Configuration git repository tag: $configTag"
+                            } catch (err) {
+                                echo "Failed: ${err}"
+                                currentBuild.result = "FAILURE"
+                                throw new Exception("Error occurred parsing source tag ${params.SOURCE_BUILD_TAG}")
+                            }
+                        }
+                    }
+                }
+                stage('Update local maven pom version to Build Tag value') {
+                    steps {
+                        dir ('checkout-directory') {
+                            sh "mvn versions:set -DnewVersion=${params.SOURCE_BUILD_TAG}"
+                        }
+                    }
+                }
+                stage('Quality Assurance - Maven Tests') {
+                    steps {
+                        dir ('checkout-directory') {
+                            sh 'mvn test'
+                        }
+                    }
+                }
+                stage('App Build and Package') {
+                    steps {
+                        dir ('checkout-directory') {
+                            sh 'mvn clean package -Dmaven.javadoc.skip=true -DskipTests'
+                        }
+                    }
+                }
+            }
+        }
+        stage('Bake') {
+            stages {
+                stage('Configuration checkout') {
+                    steps {
+                        checkout(
+                            changelog: false,
+                            poll: false,
+                            scm:
+                            [$class                              : 'GitSCM', branches: [[name: "refs/tags/${configTag}"]],
+                                doGenerateSubmoduleConfigurations: false,
+                                extensions                       : [[$class: 'RelativeTargetDirectory', relativeTargetDir: 'config-checkout-directory']],
+                                submoduleCfg                     : [],
+                                userRemoteConfigs                : [[credentialsId: "${params.CONFIG_GIT_CREDENTIAL_ID}", url: "${params.CONFIG_GIT_URL}"]]]
+                        )
+                    }
+                }
+                stage('Prepare s2i directory') {
+                    steps {
+                        sh """
+                            set -Eeuo pipefail
+                            rm -rf ${WORKSPACE}/s2i-binary
+                            mkdir -p ${WORKSPACE}/s2i-binary
+                            cp -r ${WORKSPACE}/config-checkout-directory/s2i/* ${WORKSPACE}/s2i-binary
+                            cp ${WORKSPACE}/checkout-directory/${params.APP_ARTIFACT_RELATIVE_TARGET_PATH}/${params.APP_ARTIFACT_FILENAME} ${WORKSPACE}/s2i-binary
+                        """
+                    }
+                }
+                stage('Update BuildConfig') {
+                    steps {
+                        script {
+                            withCredentials([string(credentialsId: "${params.OCP_SERVICE_TOKEN_CREDENTIAL_ID}", variable: 'OCP_SERVICE_TOKEN')]) {
+                                def buildconfigUpdateResult =
+                                    sh(
+                                        script: "oc patch bc ${params.OCP_APP} -o name -p '{\"spec\":{\"output\":{\"to\":{\"kind\":\"DockerImage\",\"name\":\"${targetImage}\"}}}}' --token=${OCP_SERVICE_TOKEN} $ocpCommandCommonParams",
+                                        returnStatus: true
+                                    )
+                                if (buildconfigUpdateResult != 0) {
+                                    currentBuild.result = "FAILURE"
+                                    error('BuildConfig patch finished with errors')
+                                }
+                                echo "Patch BuildConfig completed"
+                            }
+                        }
+                    }
+                }
+                stage('Start New Build') {
+                    steps {
+                        script {
+                            withCredentials([string(credentialsId: "${params.OCP_SERVICE_TOKEN_CREDENTIAL_ID}", variable: 'OCP_SERVICE_TOKEN')]) {
+                                def startBuildResult =
+                                    sh(
+                                        script: "oc start-build ${params.OCP_APP} --token=${OCP_SERVICE_TOKEN} --from-dir=${WORKSPACE}/s2i-binary $ocpCommandCommonParams --follow",
+                                        returnStatus: true
+                                    )
+                                if (startBuildResult != 0) {
+                                    currentBuild.result = "FAILURE"
+                                    error('Start build finished with errors')
+                                }
+                                echo "Start build completed"
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        stage('Deploy') {
+            stages {
+                stage('Set image') {
+                    steps {
+                        script {
+                            withCredentials([string(credentialsId: "${params.OCP_SERVICE_TOKEN_CREDENTIAL_ID}", variable: 'OCP_SERVICE_TOKEN')]) {
+                                def patchDCImage =
+                                    sh(
+                                        script: "oc set image dc/${params.OCP_APP} ${params.OCP_APP}=${targetImage} --token=${OCP_SERVICE_TOKEN} $ocpCommandCommonParams",
+                                        returnStatus: true
+                                    )
+                                // Check if current image is really the desired version
+                                if (patchDCImage == 0) {
+                                    def currentDCImage =
+                                        sh(
+                                            script: "oc get dc ${params.OCP_APP} -o jsonpath='{.spec.template.spec.containers[0].image}' --token=${OCP_SERVICE_TOKEN} $ocpCommandCommonParams",
+                                            returnStdout: true
+                                        )
+                                    // if current DeploymentConfig image tag version it's different form BUIL_TAG we end the pipeline with an error
+                                    if (!currentDCImage.equalsIgnoreCase("${targetImage}")) {
+                                        echo "DeploymentConfig image tag version is: $currentImageStreamVersion but expected tag is ${targetImage}"
+                                        currentBuild.result = "FAILURE"
+                                        error('Set built image finished with errors: DeploymentConfig image tag version is wrong')
+                                    }
+                                }
+                                else {
+                                    currentBuild.result = "FAILURE"
+                                    error('Set deploymentconfig image finished with errors')
+                                }
+                                echo "Deploymentconfig image set completed"
+                            }
+                        }
+                    }
+                }
+                stage('Update app configuration') {
+                    steps {
+                        script {
+                            withCredentials([string(credentialsId: "${params.OCP_SERVICE_TOKEN_CREDENTIAL_ID}", variable: 'OCP_SERVICE_TOKEN')]) {
+                                def updateConfigSecret =
+                                    sh(
+                                        script: """
+                                              set -Eeuo pipefail
+                                              oc apply -f ${WORKSPACE}/config-checkout-directory/${envId}/secret/config-data-secret.yaml --token=${OCP_SERVICE_TOKEN} $ocpCommandCommonParams
+                                              oc set env --from=secret/${params.OCP_APP}-config-data dc/${params.OCP_APP} --token=${OCP_SERVICE_TOKEN} $ocpCommandCommonParams
+                                            """,
+                                        returnStatus: true
+                                    )
+                                if (updateConfigSecret != 0) {
+                                    currentBuild.result = "FAILURE"
+                                    error('Update app configuration secret finished with errors')
+                                }
+                                echo "Update app configuration secret completed"
+
+                                def updateConfigMap =
+                                    sh(
+                                        script: """
+                                              set -Eeuo pipefail
+                                              oc create configmap ${params.OCP_APP}-config --from-file=${WORKSPACE}/config-checkout-directory/${envId}/config/ --dry-run -o yaml --token=${OCP_SERVICE_TOKEN} $ocpCommandCommonParams | oc replace --token=${OCP_SERVICE_TOKEN} $ocpCommandCommonParams -f -
+                                              oc label configmap ${params.OCP_APP}-config app=${params.OCP_APP} --token=${OCP_SERVICE_TOKEN} $ocpCommandCommonParams
+                                            """,
+                                        returnStatus: true
+                                    )
+                                if (updateConfigMap != 0) {
+                                    currentBuild.result = "FAILURE"
+                                    error('Update app configuration finished with errors')
+                                }
+                                echo "Update app configuration file (config map) completed"
+                            }
+                        }
+                    }
+                }
+                stage('Rollout') {
+                    steps {
+                        script {
+                            withCredentials([string(credentialsId: "${params.OCP_SERVICE_TOKEN_CREDENTIAL_ID}", variable: 'OCP_SERVICE_TOKEN')]) {
+                                def rolloutResult =
+                                    sh(
+                                        script: "oc rollout latest ${params.OCP_APP} --token=${OCP_SERVICE_TOKEN} $ocpCommandCommonParams",
+                                        returnStatus: true
+                                    )
+                                if (rolloutResult != 0) {
+                                    currentBuild.result = "FAILURE"
+                                    error('Rollout finished with errors')
+                                }
+                                echo "Rollout completed"
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

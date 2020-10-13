@@ -1,0 +1,70 @@
+pipeline {
+    agent any
+    
+    parameters { 
+        string(name: 'SOURCE_IMAGE_TAG', defaultValue: '', description: 'Tag of the source image (same tag will be used for target image)', trim: true)
+        string(name: 'SOURCE_IMAGE_NAME', defaultValue: '', description: 'Name of the source image (it is the name of the application on Openshift and the same name will be used on target image registry)', trim: true)
+        string(name: 'SOURCE_IMAGE_REGISTRY_CREDENTIAL_ID', defaultValue: '', description: 'Credentials ID (username and password/token) of the source image registry', trim: true)
+        string(name: 'SOURCE_IMAGE_REGISTRY_HOST_PORT', defaultValue: '', description: 'Source image registry host:port', trim: true)
+        string(name: 'SOURCE_IMAGE_REGISTRY_NAMESPACE_PREFIX', defaultValue: '', description: 'Prefix for image namespace in the source image registry', trim: true)
+        string(name: 'SOURCE_IMAGE_NAMESPACE', defaultValue: '', description: 'Image namespace in the source image registry', trim: true)
+        string(name: 'TARGET_IMAGE_REGISTRY_CREDENTIAL_ID', defaultValue: '', description: 'Credentials ID (username and password/token) of the target image registry', trim: true)
+        string(name: 'TARGET_IMAGE_REGISTRY_HOST_PORT', defaultValue: '', description: 'Target image registry host:port', trim: true)
+        string(name: 'TARGET_IMAGE_REGISTRY_NAMESPACE_PREFIX', defaultValue: '', description: 'Prefix for image namespace in the target image registry', trim: true)
+        string(name: 'TARGET_IMAGE_NAMESPACE', defaultValue: '', description: 'Image namespace in the target image registry', trim: true)
+    }
+    
+    options {
+        timeout(time: 30, unit: 'MINUTES')
+        timestamps()
+    }
+
+    stages {
+        stage('Log pipeline environment') {
+            steps {
+                echo "Source registry"
+                echo "> Host:port        : ${params.SOURCE_IMAGE_REGISTRY_HOST_PORT}"
+                echo "> Credential ID    : ${params.SOURCE_IMAGE_REGISTRY_CREDENTIAL_ID}"
+                echo "> Namespace prefix : ${params.SOURCE_IMAGE_REGISTRY_NAMESPACE_PREFIX}"
+                echo "> Namespace        : ${params.SOURCE_IMAGE_NAMESPACE}"
+                echo "> Image name       : ${params.SOURCE_IMAGE_NAME}"
+                echo "> Image tag        : ${params.SOURCE_IMAGE_TAG}"
+                    
+                echo " -------------------------------------------------------- "
+                
+                echo "Target registry"
+                echo "> Host:port        : ${params.TARGET_IMAGE_REGISTRY_HOST_PORT}"
+                echo "> Credential ID    : ${params.TARGET_IMAGE_REGISTRY_CREDENTIAL_ID}"
+                echo "> Namespace prefix : ${params.TARGET_IMAGE_REGISTRY_NAMESPACE_PREFIX}"
+                echo "> Namespace        : ${params.TARGET_IMAGE_NAMESPACE}"
+                    
+                echo " -------------------------------------------------------- "
+                echo ""
+                echo "Workspace : ${WORKSPACE}"
+            }
+        }
+        stage('Copy stage') {
+            steps {
+                script {
+                    withCredentials([
+                        usernamePassword(credentialsId: "${params.SOURCE_IMAGE_REGISTRY_CREDENTIAL_ID}", usernameVariable: 'SOURCE_USERNAME', passwordVariable: 'SOURCE_PASSWORD'),
+                        usernamePassword(credentialsId: "${params.TARGET_IMAGE_REGISTRY_CREDENTIAL_ID}", usernameVariable: 'TARGET_USERNAME', passwordVariable: 'TARGET_PASSWORD')]) {
+                        
+                        def fullSourceImage = "${params.SOURCE_IMAGE_REGISTRY_HOST_PORT}/${params.SOURCE_IMAGE_REGISTRY_NAMESPACE_PREFIX}${params.SOURCE_IMAGE_NAMESPACE}/${params.SOURCE_IMAGE_NAME}:${params.SOURCE_IMAGE_TAG}"
+                        def fullTargetImage = "${params.TARGET_IMAGE_REGISTRY_HOST_PORT}/${params.TARGET_IMAGE_REGISTRY_NAMESPACE_PREFIX}${params.TARGET_IMAGE_NAMESPACE}/${params.SOURCE_IMAGE_NAME}:${params.SOURCE_IMAGE_TAG}"
+                        def skopeoCopyResult =
+                            sh(
+                                script: "podmanr run --rm quay.io/skopeo/stable copy --src-creds ${SOURCE_USERNAME}:${SOURCE_PASSWORD} --src-tls-verify=false --dest-creds ${TARGET_USERNAME}:${TARGET_PASSWORD} --dest-tls-verify=false docker://${fullSourceImage} docker://${fullTargetImage}",
+                                returnStatus: true
+                            )
+                        if (skopeoCopyResult!=0) {
+                            currentBuild.result = 'FAILURE'
+                            error('Error occurred executing image copy')
+                        }
+                        echo "Image ${fullSourceImage} copied to ${fullTargetImage}"
+                    }
+                }
+            }
+        }
+    }
+}

@@ -1,0 +1,7 @@
+### VS Code ###
+.vscode/
+
+# Extra
+TODO
+.DS_Store
+local-data.txt

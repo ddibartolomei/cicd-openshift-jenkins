@@ -19,7 +19,7 @@ if [[ $# -eq 0 ]]; then
     exit 0
 fi
 
-if [[ $# -ne 6 ]]; then
+if [[ $# -ne 7 ]]; then
     echo "Illegal number of parameters"
     exit 1
 fi

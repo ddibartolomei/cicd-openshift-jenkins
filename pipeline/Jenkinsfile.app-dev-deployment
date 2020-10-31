@@ -52,7 +52,7 @@ pipeline {
                     [$class: 'StringParameterValue', name: 'IMAGE_REGISTRY_HOST_PORT', value: "<DEV_ENV_QUAY_REGISTRY_HOST_PORT_PLACEHOLDER>"],
                     [$class: 'StringParameterValue', name: 'IMAGE_REGISTRY_NAMESPACE_PREFIX', value: "openshift_"],
                     [$class: 'StringParameterValue', name: 'OCP_PROJECT', value: "<DEV_ENV_OCP_PROJECT_NAMESPACE_PLACEHOLDER>"],
-                    [$class: 'StringParameterValue', name: 'OCP_APP', value: "<OCP_APP_NAME_PLACEHOLDER>"],
+                    [$class: 'StringParameterValue', name: 'OCP_APP', value: "<DEV_ENV_OCP_APP_NAME_PLACEHOLDER>"],
                 ], wait: true
             }
         }

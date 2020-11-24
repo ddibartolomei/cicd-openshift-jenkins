@@ -317,7 +317,7 @@ s2i
                         module.xml
 svil
     config
-        DatiConguagli.properties
+        myappconfig.properties
     secret
         config-data-secret.yaml
 ```
@@ -328,12 +328,12 @@ Example of structure for the *test* (and *production*) configuration repository:
 ```
 coll
     config
-        DatiConguagli.properties
+        myappconfig.properties
     secret
         config-data-secret.yaml
 prod
     config
-        DatiConguagli.properties
+        myappconfig.properties
     secret
         config-data-secret.yaml
 ```

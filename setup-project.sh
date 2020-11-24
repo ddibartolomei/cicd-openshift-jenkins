@@ -4,7 +4,6 @@ set -Eeuo pipefail
 trap "echo Setup failed!" ERR
 
 # Setup project, bind Jenkins service account and create Quay registry push/pull secret
-# By convention the service account name will be the same as the namespace it belongs to
 
 if [[ $# -eq 0 ]]; then
     SCRIPT_NAME=`basename "$0"`
